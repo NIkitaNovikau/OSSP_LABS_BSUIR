@@ -6,29 +6,31 @@
 #include <chrono>
 #include <queue>
 #include <cstring>
-#include<unistd.h>               
+#include<unistd.h> 
+
 using namespace std;
 
-// Size of the message buffer
+// Размер буфера сообщений
 const int bufferSize = 256;
 
-// Structure to represent a message
+// Структура для представления сообщения
 struct Message {
     char data[bufferSize];
     int size;
     int hash;
 };
 
-// Circular buffer to hold messages
+// Циклический буфер для хранения сообщений
 queue<Message*> messageQueue;
 int messageCount = 0;
 int messageExtracted = 0;
 mutex queueMutex;
-condition_variable queueNotEmpty;
+condition_variable queueNotEmpty;//это примитив синхронизации, предоставляемый стандартной библиотекой C++11, который позволяет потокам ждать, 
+//пока определенное условие станет истинным, прежде чем продолжить. 
 condition_variable queueNotFull;
 const int queueSize = 10;
 const int messageLimit = 100;
-
+//свой алгоритм подсчета hash
    unsigned short calculateHash(char* hashed){
         unsigned short crc = 0xFFFF;
         unsigned char i;
@@ -44,31 +46,30 @@ const int messageLimit = 100;
         return crc;
     }
 
-// Producer process function
+// Функция процесса производителя
 void producer() {
 
-    // Seed the random number generator
     srand(time(NULL));
 
     while (true) {
 
-        // Generate a message
+        // Генерируем сообщение
         Message* message = new Message();
         message->size = rand() % 257;
 
-        // If size is zero or 256, set it to the appropriate value
+        // Если размер равен нулю или 256, установите соответствующее значение
         if (message->size == 0) {
             message->size = 256;
         } else if (message->size == 256) {
             message->size = 0;
         }
 
-        // Generate data for the message
+        // Генерируем данные для сообщения
         for (int i = 0; i < 10; i++) {
             message->data[i] = char(rand() % 100);
         }
 
-        // Calculate hash for the message
+        // Рассчитываем хеш для сообщения
         message->hash = calculateHash(message->data);
 
         // Wait for space in the queue
@@ -76,17 +77,17 @@ void producer() {
         while (messageQueue.size() == queueSize) {
             queueNotFull.wait(locker);
         }
-        // Add the message to the queue
+       
         messageQueue.push(message);
         sleep(1);
-        // Increment message count and output to stdout
+        // Увеличиваем количество сообщений и выводим на стандартный вывод
         messageCount++;
         cout << "Producer: Added message " << messageCount << endl;
-        // Notify consumers that the queue is not empty
+        // Сообщаем потребителям, что очередь не пуста
         queueNotEmpty.notify_one();
     }
 }
-    // Consumer process function
+    // Функция процесса-потребителя
     void consumer() {
 
     while (true) {
@@ -96,25 +97,25 @@ void producer() {
         queueNotEmpty.wait(locker);
     }
 
-    // Extract the message from the queue
+    // Извлечь сообщение из очереди
     Message* message = messageQueue.front();
     messageQueue.pop();
 
-    // Release the lock on the queue
+    // Снимаем блокировку с очереди
     locker.unlock();
 
-    // Check the hash of the message
+    // Проверяем хэш сообщения
     int calculatedHash = calculateHash(message->data);
     if (message->hash != calculatedHash) {
         cout << "Consumer: Message hash check failed" << endl;
     }
     sleep(1);
-    // Increment message extracted count and output to stdout
+    // Увеличить количество извлеченных сообщений и вывести их на стандартный вывод
     messageExtracted++;
     cout << "Consumer: Extracted message " << messageExtracted << endl;
     cout << "Got message hash :" << message->hash << "\n" << "Size text: " << message->size<< "\n"
     << "Text : " << message->data << endl;
-    // Delete the message and notify producers that the queue is not full
+    // Удаляем сообщение и уведомляем производителей, что очередь не заполнена
     delete message;
     queueNotFull.notify_one();
     }
@@ -123,14 +124,15 @@ void producer() {
 
 int main() 
 { 
-thread producerThread(producer); 
+thread producerThread(producer);//это класс, предоставляемый стандартной библиотекой C++11, который представляет один поток выполнения. 
 thread consumerThread(consumer);
 
-// Wait for user input to exit
+// Подождите, пока пользовательский ввод завершится...
 cout << "Press Enter to quit" << endl;
 cin.ignore();
-// Notify threads to quit
-producerThread.detach();
+// Уведомляем потоки о выходе
+producerThread.detach();//это функция, предоставляемая стандартной библиотекой C++11, которая позволяет вам отсоединить поток от вызывающего потока,
+// чтобы два потока могли продолжать выполняться независимо. 
 consumerThread.detach();
     return 0;
 }
