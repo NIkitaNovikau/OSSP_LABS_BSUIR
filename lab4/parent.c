@@ -72,7 +72,7 @@ void producer() {
         // Рассчитываем хеш для сообщения
         message->hash = calculateHash(message->data);
 
-        // Wait for space in the queue
+        // Ожидаем свободного места в очереди
         unique_lock<mutex> locker(queueMutex);
         while (messageQueue.size() == queueSize) {
             queueNotFull.wait(locker);
