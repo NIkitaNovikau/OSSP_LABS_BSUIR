@@ -60,7 +60,7 @@ void producer() {
         // Если размер равен нулю или 256, установите соответствующее значение
         if (message->size == 0) {
             message->size = 256;
-        } else if (message->size == 256) {
+        } else if (message->size == 256) {//а остальное делается парралельно 
             message->size = 0;
         }
 
@@ -71,39 +71,41 @@ void producer() {
 
         // Рассчитываем хеш для сообщения
         message->hash = calculateHash(message->data);
-
+        /////////////////////////////////////////////////////
         // Ожидаем свободного места в очереди
         unique_lock<mutex> locker(queueMutex);
         while (messageQueue.size() == queueSize) {
             queueNotFull.wait(locker);
         }
        
-        messageQueue.push(message);
+        messageQueue.push(message);//это делается синхронно
         sleep(1);
         // Увеличиваем количество сообщений и выводим на стандартный вывод
         messageCount++;
         cout << "Producer: Added message " << messageCount << endl;
         // Сообщаем потребителям, что очередь не пуста
         queueNotEmpty.notify_one();
+        /////////////////////////////////////////////////////
     }
 }
     // Функция процесса-потребителя
     void consumer() {
 
     while (true) {
-
+    /////////////////////////////////////////////////////
       unique_lock<mutex> locker(queueMutex);
     while (messageQueue.empty()) {
         queueNotEmpty.wait(locker);
     }
 
     // Извлечь сообщение из очереди
-    Message* message = messageQueue.front();
+    Message* message = messageQueue.front();/это делается синхронно
     messageQueue.pop();
 
     // Снимаем блокировку с очереди
     locker.unlock();
-
+    /////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////
     // Проверяем хэш сообщения
     int calculatedHash = calculateHash(message->data);
     if (message->hash != calculatedHash) {
@@ -112,12 +114,13 @@ void producer() {
     sleep(1);
     // Увеличить количество извлеченных сообщений и вывести их на стандартный вывод
     messageExtracted++;
-    cout << "Consumer: Extracted message " << messageExtracted << endl;
+    cout << "Consumer: Extracted message " << messageExtracted << endl;//а это парралельно
     cout << "Got message hash :" << message->hash << "\n" << "Size text: " << message->size<< "\n"
     << "Text : " << message->data << endl;
     // Удаляем сообщение и уведомляем производителей, что очередь не заполнена
     delete message;
     queueNotFull.notify_one();
+    /////////////////////////////////////////////////////
     }
 }
 
