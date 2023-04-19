@@ -37,7 +37,7 @@ int shm_open(const char* name, int oflag, mode_t mode); //Выделение р�
 
 void exit_programm(int sig); 
 int analysis_command(string command);
-void ararm_signal(int sig);
+
 
 void exit_programm(int sig)
 {
