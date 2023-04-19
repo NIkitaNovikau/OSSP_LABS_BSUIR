@@ -9,7 +9,7 @@
 #include<unistd.h> 
 
 using namespace std;
-
+//unique_lock vs lock_guard лучше unique_lock так как более гибким
 // Размер буфера сообщений
 const int bufferSize = 256;
 
