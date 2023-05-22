@@ -18,11 +18,15 @@ struct Message {
     int size;
     int hash;
 };
-
+//unique_lock vs lock_guard лучше unique_lock так как более гибким
+// Размер буфера сообщений
+// Циклический буфер для хранения сообщений
 queue<Message*> messageQueue;
 int messageCount = 0;
 int messageExtracted = 0;
 mutex queueMutex;
+//это примитив синхронизации, предоставляемый стандартной библиотекой C++11, который позволяет потокам ждать, 
+//пока определенное условие станет истинным, прежде чем продолжить. 
 condition_variable queueNotEmpty;
 condition_variable queueNotFull;
 int queueSize = 5;
@@ -59,7 +63,7 @@ void producer() {
         }
 
         message->hash = calculateHash(message->data);
-
+        // Ожидаем свободного места в очереди
         unique_lock<mutex> locker(queueMutex);
         while (messageQueue.size() >= queueSize) {
             queueNotFull.wait(locker);
@@ -85,7 +89,7 @@ void consumer() {
 
         Message* message = messageQueue.front();
         messageQueue.pop();
-
+        // Снимаем блокировку с очереди
         locker.unlock();
 
         int calculatedHash = calculateHash(message->data);
@@ -120,6 +124,7 @@ int main() {
     while (true) {
         char key = cin.get();
         if (key == '+') {
+            cout << "Queue size : " << queueSize << endl;
             unique_lock<mutex> locker(queueMutex);
             queueSize++;
             cout << "///////////////////////////////////////////////////////////////////"<< endl;
@@ -128,6 +133,7 @@ int main() {
             locker.unlock();
             queueNotFull.notify_all();
         } else if (key == '-') {
+            cout << "Queue size : " << queueSize << endl;
             unique_lock<mutex> locker(queueMutex);
             if (queueSize > 0) {
                 queueSize--;
@@ -144,7 +150,7 @@ int main() {
     }
 
     producerThread.join();
-    consumerThread.join();
+    consumerThread.join();//используется для ожидания завершения выполнения потока
 
     return 0;
 }
