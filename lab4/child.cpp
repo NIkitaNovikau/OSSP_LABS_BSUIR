@@ -1,92 +1,119 @@
-
 #include <iostream>
-#include <cstdlib>
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <sys/sem.h>
 #include <unistd.h>
-#include <ctime>
-#include <random>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <string.h>
+#include <sys/shm.h>
+#include <semaphore.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <functional>
+#include "datastruct.h"
+#define perms 0777
+#define SHM_KEY 0x1234
+#define SEMAPHORE_NAME "/semName"
 
-#define SHM_SIZE 1024
+using namespace std;
 
-typedef struct {
-    uint8_t type;
-    uint16_t hash;
-    uint8_t size;
-    char data[256];
-} Message;
-
-union semun {
-    int val;
-    struct semid_ds *buf;
-    ushort *array;
-};
-
-void error(const char* msg) {
-    perror(msg);
-    exit(1);
+bool tryAddMessage(QueueExtension *broker, Message m)
+{
+    if(broker->inCount >= 255)
+        return false;
+    broker->push(m);
+    return true;
 }
 
-void generateMessage(Message* message) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> sizeDistribution(1, 256);
-    std::uniform_int_distribution<> dataDistribution(32, 126);
-
-    message->type = 1;
-    message->hash = 0;
-    message->size = sizeDistribution(gen);
-    for (int i = 0; i < message->size; ++i) {
-        message->data[i] = dataDistribution(gen);
-        message->hash += message->data[i];
-    }
+bool tryReadMessage(QueueExtension *broker, Message* msg)
+{
+    if(broker->isEmpty())
+        return false;
+    *msg = broker->pop();
+    return true;
 }
 
-int main() {
-    key_t key = ftok("child.cpp", 'R');
-    if (key == -1)
-        error("ftok failed");
+char* randstring(int length) {
 
-    int shmid = shmget(key, SHM_SIZE, 0);
-    if (shmid == -1)
-        error("shmget failed");
+    static char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.-#'?!";        
+    char *randomString = NULL;
 
-    Message* sharedMemory = (Message*)shmat(shmid, NULL, 0);
-    if (sharedMemory == (void*)-1)
-        error("shmat failed");
+    if (length) 
+    {
+        randomString = new char[length+1];
 
-    int semid = semget(key, 2, 0);
-    if (semid == -1)
-        error("semget failed");
+        if (randomString) {            
+            for (int n = 0;n < length;n++) {            
+                int key = rand() % (int)(sizeof(charset) -1);
+                randomString[n] = charset[key];
+            }
 
-    sembuf buf;
-    buf.sem_flg = 0;
-
-    std::cout << "Child process started." << std::endl;
-
-    while (true) {
-        buf.sem_num = 0;  // Semaphore for adding message
-        buf.sem_op = -1; // Decrease semaphore value
-        semop(semid, &buf, 1);
-
-        Message* message = sharedMemory;
-
-        generateMessage(message);
-
-        buf.sem_num = 1;  // Semaphore for consuming message
-        buf.sem_op = 1;  // Increase semaphore value
-        semop(semid, &buf, 1);
-
-        std::cout << "Produced a message. Total: " << (int)message->size << std::endl;
-
-        sleep(1);
+            randomString[length] = '\0';
+        }
     }
 
-    shmdt(sharedMemory);
+    return randomString;
+}
 
-    std::cout << "Child process finished." << std::endl;
+Message generateMessage()
+{
+    Message m;
+    int num = rand();
+    int size = num % 257;
+    m.size = size;
+    int dataSize = ((size+3)/4)*4;    
+
+    strcpy(m.data, randstring(dataSize));
+
+    m.hash = dataSize + m.size;
+    return m;
+}
+
+void lockAction(sem_t * sem, const function<void()>& f)
+{
+	try
+	{
+		sem_wait(sem);//блокировка сем
+		f();
+		sem_post(sem);//разблок сем
+	}
+	catch (...)
+	{
+		sem_post(sem);
+	}
+}
+
+int main(int argc, char** argv)
+{
+    int shmid = shmget(SHM_KEY, sizeof(QueueExtension), perms);
+    QueueExtension *broker = (QueueExtension*) shmat(shmid, NULL, 0);
+
+    sem_t* sem = sem_open(SEMAPHORE_NAME, O_RDWR);
+    
+    int type = atoi(argv[1]);
+    string typeName = type == 1 ? "producer" : "consumer";
+    cout << "I am " << argv[0] << " (" << typeName << ") My PID is " << getpid() << endl;
+
+    while(1)
+    {
+        if(type == 1)
+        {
+            Message m = generateMessage();
+            lockAction(sem, [&]() {
+                if(tryAddMessage(broker, m))
+                    cout << argv[0] << "(PID " << getpid() << ") puts message" << endl; 
+            });
+        }
+        else
+        {
+            Message m;
+            lockAction(sem, [&]() {
+                if(tryReadMessage(broker, &m))
+                    cout << "Message " << broker->outCount << " readed (" << argv[0] << ") data: " << m.data << endl; 
+            });
+        }
+        sleep(2);
+    }
 
     return 0;
 }
