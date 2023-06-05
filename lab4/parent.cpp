@@ -1,126 +1,104 @@
 #include <iostream>
-#include <cstdlib>
-#include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <sys/sem.h>
+#include <algorithm>
+#include <string>
 #include <unistd.h>
-#include <cstring>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <semaphore.h>
+#include <vector>
+#include <sys/shm.h>
+#include "datastruct.h"
 
-#define SHM_SIZE 1024
-#define MAX_MESSAGES 10
+#define CHILD_PATH "./"
+#define CHILD_PROGRAM_NAME "child"
+#define perms 0777
+#define SHM_KEY 0x1234
+#define SEMAPHORE_NAME "/semName"
 
-typedef struct {
-    uint8_t type;
-    uint16_t hash;
-    uint8_t size;
-    char data[256];
-} Message;
+using namespace std;
 
-union semun {
-    int val;
-    struct semid_ds *buf;
-    ushort *array;
-};
-
-void error(const char* msg) {
-    perror(msg);
-    exit(1);
+string childName(int childNumber)
+{
+    return CHILD_PROGRAM_NAME + to_string(childNumber);
 }
 
-int main() {
-    key_t key = ftok("child.cpp", 'R');
-    if (key == -1)
-        error("ftok failed");
-
-    int shmid = shmget(key, SHM_SIZE, IPC_CREAT | 0666);
-    if (shmid == -1)
-        error("shmget failed");
-
-    Message* sharedMemory = (Message*)shmat(shmid, NULL, 0);
-    if (sharedMemory == (void*)-1)
-        error("shmat failed");
-
-    int semid = semget(key, 2, IPC_CREAT | 0666);
-    if (semid == -1)
-        error("semget failed");
-
-    union semun arg;
-    arg.val = 1;
-    if (semctl(semid, 0, SETVAL, arg) == -1)
-        error("semctl failed");
-
-    arg.val = 0;
-    if (semctl(semid, 1, SETVAL, arg) == -1)
-        error("semctl failed");
-
-    int producersCount = 0;
-    int consumersCount = 0;
-
-    std::cout << "Parent process started." << std::endl;
-
-    while (true) {
-        std::string command;
-        std::cin >> command;
-
-        if (command == "+p") {
-            if (producersCount >= MAX_MESSAGES) {
-                std::cout << "Max producers count reached." << std::endl;
-                continue;
-            }
-
-            pid_t pid = fork();
-            if (pid == -1) {
-                error("fork failed");
-            } else if (pid == 0) {
-                execl("./child", "child", nullptr);
-                error("execl failed");
-            }
-
-            ++producersCount;
-            std::cout << "Started producer " << pid << std::endl;
-        } else if (command == "-p") {
-            if (producersCount <= 0) {
-                std::cout << "No producers running." << std::endl;
-                continue;
-            }
-            
-            --producersCount;
-            std::cout << "Stopped a producer." << std::endl;
-        } else if (command == "+c") {
-            if (consumersCount >= MAX_MESSAGES) {
-                std::cout << "Max consumers count reached." << std::endl;
-                continue;
-            }
-
-            pid_t pid = fork();
-            if (pid == -1) {
-                error("fork failed");
-            } else if (pid == 0) {
-                execl("./child", "child", nullptr);
-                error("execl failed");
-            }
-
-            ++consumersCount;
-            std::cout << "Started consumer " << pid << std::endl;
-            } else if (command == "-c") {
-            if (consumersCount <= 0) {
-            std::cout << "No consumers running." << std::endl;
-            continue;
-            }
-        --consumersCount;
-        std::cout << "Stopped a consumer." << std::endl;
-    } else {
-        std::cout << "Unknown command." << std::endl;
+pid_t createChildProcess(char* programPath, char** argv, char** envp)
+{
+    pid_t p = fork();
+    
+    if(p == 0)
+    {
+        execve(programPath, argv, envp);
     }
+    else if(p > 0)
+    {
+        cout << "Parent PID = " << getpid() << endl;
+    }   
+    return p;
 }
 
-shmdt(sharedMemory);
-shmctl(shmid, IPC_RMID, NULL);
-semctl(semid, 0, IPC_RMID, arg);
-semctl(semid, 1, IPC_RMID, arg);
+char* childProgramPath()
+{
+    char* tmp = new char[255];
+    strcpy(tmp, CHILD_PATH);
+    strcat(tmp, CHILD_PROGRAM_NAME);
+    return tmp;
+}
 
-std::cout << "Parent process finished." << std::endl;
+char** createChildProcessArgv(const char* name, int type)
+{
+    size_t argument_size = 255*sizeof(char);
+    char** argv = new char*[3];
+    argv[0] = new char[argument_size]; 
+    argv[1] = new char[argument_size]; 
+    argv[2] = NULL;
+    strcpy(argv[0], name);
+    strcpy(argv[1], to_string(type).c_str());
 
-return 0;
+    return argv;
+}
+
+int main(int argc, char** argv, char** envp)
+{
+    int shmid = shmget(SHM_KEY, sizeof(QueueExtension), IPC_CREAT | perms);//создание и получ идентифик разд памяти
+    QueueExtension *broker = (QueueExtension*) shmat(shmid, NULL, 0);//подкл процесс к разд памяти
+    broker->inCount = broker->outCount = 0;
+
+    sem_t* sem = sem_open(SEMAPHORE_NAME, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR, 1);//новый именнованный семафор
+
+    int childProcessesCount = 0;
+
+    vector<pid_t> processes;
+    char ch;
+    while(1)
+    {
+        cout << endl << endl << "Input character: ";
+
+        cin.clear();//сюрос флага сост потока
+        cin >> ch;
+        
+        int type;
+        if(ch == 'p') type = 1;
+        else if(ch == 'c') type = 0;
+        else break;
+
+        string cName = childName(childProcessesCount++);
+        char** cArgv = createChildProcessArgv(cName.c_str(), type);
+        char* programPath = childProgramPath();
+
+        pid_t childPid = createChildProcess(programPath, cArgv, envp);
+        processes.push_back(childPid);
+    }
+
+    for(auto pid : processes) kill(pid, SIGKILL);
+
+    sem_close(sem);//закрыть именнованный семафор 
+    sem_destroy(sem);//уничтожает безымянный семафор
+    close(shmid);
+
+    return 0;   
 }
